@@ -7,34 +7,27 @@ import sys
 from bs4 import BeautifulSoup
 from sqlalchemy.orm import sessionmaker
 
+
 class StoriesTextScraper(multiprocessing.Process):
 
-    def __init__(self, start=0, skip=12):
+    def __init__(self, column, lock):
         multiprocessing.Process.__init__(self)
-        self.starting = start
-        self.skip = skip
+        self.column = column
+        self.lock = lock
 
     def run(self):
         engine = create_engine(DBEngine.database_location)
-        metadata = MetaData()
-        Session = sessionmaker(bind=engine)
-        session = Session()
+        metadata = MetaData(bind=engine)
         metadata.reflect(engine)
-        story_page_table = Table(DBEngine.StoryPageTable, metadata)
         story_text_table = Table(DBEngine.StoryTextsTable, metadata)
-        i=self.starting
-        for column in session.query(story_page_table).yield_per(1000):
-            try:
-                if i % self.skip==0:
-                    id, title, url=column
-                    print(id)
-                    if url is None: 
-                        continue
-                    request = requests.get(url).text.encode(sys.stdout.encoding, errors='replace')
-                    content = BeautifulSoup(request, "lxml").find_all('p',text=True)
-                    for c in content:
-                        session.execute(story_text_table.insert(), {"text":c.get_text(), "id_source":id})
-                        session.commit()
-                i+=1
-            except Exception as e: 
-                print(e)
+        try:
+            if self.column.url is None:
+                return
+            request = requests.get(self.column.url).text.encode(sys.stdout.encoding, errors='replace')
+            content = BeautifulSoup(request, "lxml").find_all('p', text=True)
+            for c in content:
+                with self.lock:
+                    with engine.connect() as connection:
+                        connection.execute(story_text_table.insert().values(text=c.get_text(), id_source=self.column.id))
+        except Exception as e:
+            print(e)
