@@ -16,13 +16,18 @@ if __name__ == '__main__':
         for p in processes:
             p.start()
     if scrapeText:
-        engine = create_engine(DBEngine.database_location)
-        Session = sessionmaker(bind=engine)
-        session = Session()
-        for i in range(19240396):
-            with lock:
-                c = session.query(DBEngine.StoryPage).get(i)
-            if c is None:
-                continue
-            print(i)
-            StoriesTextScraper(c, lock).start()
+        try:
+            engine = create_engine(DBEngine.database_location)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            for i in range(14240396,19240396):
+                with lock:
+                    c = session.query(DBEngine.StoryPage).get(i)
+                if c is None:
+                    continue
+                print(i)
+                s=StoriesTextScraper(c)
+                s.lock=lock
+                s.start()
+        except Exception as e:
+            pass
