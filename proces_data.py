@@ -17,12 +17,12 @@ if __name__ == '__main__':
     for c in session.query(DBEngine.StoryText).yield_per(1000):
         if len(c.text) > 30:
             if c.id_source == i:
-                s += c.text+' <eop> '
+                s += c.text+' eop '
             elif s != '':
-                s = s.replace('\n', ' <eol> ')
+                s = s.replace('\n', ' eol ')
                 s = re.sub('\s+', ' ', s).strip()
-                s += s[:-7] + ' <eot>'+ os.linesep
+                s += s[:-7] + ' eot'+ os.linesep
                 f.writelines(s.lower())
-                s = c.text+' <eop> '
+                s = c.text+' eop '
                 print(c.id_source)
             i = c.id_source
