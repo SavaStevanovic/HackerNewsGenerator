@@ -8,19 +8,34 @@ has at least ~100k characters. ~1M is better.
 '''
 
 from __future__ import print_function
-from keras.callbacks import LambdaCallback
-from keras.models import Sequential
-from keras.layers import Dense, Dropout
-from keras.layers import LSTM, Embedding
-from keras.optimizers import RMSprop
-from keras.utils.data_utils import get_file
-from keras.utils import to_categorical
+import time
+import tensorflow as tf
+from tensorflow.keras.callbacks import LambdaCallback
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Input
+from tensorflow.keras.layers import CuDNNLSTM, Embedding, CuDNNGRU
 import numpy as np
-import keras
+from tensorflow import keras
 import random
 import sys
 import io
 import re
+sess = tf.keras.backend.get_session()
+
+
+def _parse_function(example_proto):
+    sequence_features = {
+        'data': tf.FixedLenSequenceFeature([], tf.int64, default_value=None, allow_missing=True),
+        'label': tf.FixedLenSequenceFeature([], tf.int64, default_value=None, allow_missing=True)
+    }
+    features = {}
+    context_parsed, sequence_parsed = tf.parse_single_sequence_example(
+        example_proto, context_features=features, sequence_features=sequence_features)
+
+    data = sequence_parsed["data"]
+    labels = sequence_parsed["label"]
+    return data, labels
+
 
 def on_epoch_end(epoch):
     # Function invoked at end of each epoch. Prints generated text.
@@ -63,50 +78,36 @@ def sample(preds, temperature=1.0):
     probas = np.random.multinomial(1, preds, 1)
     return np.argmax(probas)
 
+
 # cut the text in semi-redundant sequences of maxlen characters
 maxlen = 20
-batch_size=64
+batch_size = 64
 
 dict = eval(open("dictionary.txt").read())
-words_dict=list(dict.keys())
+words_dict = list(dict.keys())
 
-print('Build model...')
+filenames = ['train1.tfrecords']
+dataset = tf.data.TFRecordDataset(filenames).apply(tf.contrib.data.map_and_batch(_parse_function, 256, num_parallel_calls=12)).shuffle(4096).prefetch(1)
+
 model = Sequential()
 model.add(Embedding(len(words_dict), 50, input_length=maxlen))
 # model.add(LSTM(256, return_sequences=True))
 # model.add(Dropout(0.1))
-model.add(LSTM(1000))
-model.add(Dropout(0.20))
+model.add(CuDNNGRU(1000, return_sequences=False))
+model.add(Dropout(rate=0.20))
 model.add(Dense(100, activation='relu'))
 model.add(Dense(len(words_dict), activation='softmax'))
 
-optimizer = keras.optimizers.adam(0.001)
-model.compile(loss='sparse_categorical_crossentropy', optimizer=optimizer, metrics=['accuracy'])
-i=0
-with io.open('.\document.txt','r', encoding='utf-8') as f:
-    for line in f:
-        print(i)
-        i+=1     
-        word_text = re.split(r'([\W])+', line)
-        word_text = [x for x in word_text if x not in [' ', '\n']]
-        sentences = []
-        next_words = []
-        for i in range(0, len(word_text) - maxlen, 1):
-            sentences.append(word_text[i: i + maxlen])
-            next_words.append(word_text[i + maxlen])
-        print('nb sequences:', len(sentences))
-        x = np.zeros((len(sentences), maxlen), dtype=np.int)
-        y = np.zeros((len(sentences)), dtype=np.int)
-        for i, sentence in enumerate(sentences):
-            for t, word in enumerate(sentence):
-                x[i, t] = words_dict.index(word)
-            y[i] = words_dict.index(next_words[i])
-        loss=[]
-        for i in range(0, len(x), batch_size):
-            loss.append(model.train_on_batch(x[i:i+batch_size], y[i:i+batch_size])[0])
-        loss.append(model.train_on_batch(x[i:len(x)], y[i:len(x)])[0])
-        print(sum(loss)/len(loss))
-    model.save('model.h5')
-    on_epoch_end(0)
+optimizer = tf.train.AdamOptimizer(0.001)
+model.compile(loss='sparse_categorical_crossentropy',
+              optimizer=optimizer, metrics=['accuracy'])
+iter = dataset.make_one_shot_iterator()
 
+for i in range(10000):
+    print(i)
+    t=time.time()
+    print(model.train_on_batch(iter))
+    print(time.time()-t)
 
+model.save('model.h5')
+# on_epoch_end(0)
